@@ -45,7 +45,7 @@ def parse_args():
 
     parser.add_argument(
         "--dataset_root",
-        default="/home/chenhuanxin/datasets/TCIR-SPLT",
+        default=r"F:\CODE_Classify\Position\Tint\data",
         help="The path of dataset dir.",
     )
 

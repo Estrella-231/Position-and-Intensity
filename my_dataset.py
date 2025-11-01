@@ -95,33 +95,44 @@ class MyDataSetTCIR(Dataset):
         Lat = self.data_info.iloc[index].loc['lat']
         Time = self.data_info.iloc[index].loc['time']
 
-        # Slice1: IR
-        # Slice2: Water vapor
-        # Slice3: VIS
-        # Slice4: PMW
+        # Slice mapping: support datasets with 3 channels or >=4 channels
+        # Expected modalities in original code: 0: IR, 1: Water vapor, 2: VIS (often unused), 3: PMW
+        sample = self.data_matrix[index]
+        # ensure numpy array
+        # sample shape expected: (H, W, C)
+        if hasattr(sample, 'shape') and len(sample.shape) == 3:
+            H, W, C = sample.shape
+        else:
+            # fallback: try to convert to numpy array
+            sample = np.array(sample)
+            if sample.ndim == 3:
+                H, W, C = sample.shape
+            else:
+                raise ValueError(f"Unexpected sample shape: {sample.shape}")
 
-        ch_slice = self.data_matrix[index][:, :, 0]
-        ch_slice1 = self.data_matrix[index][:, :, 1]
-        # ch_slice2 = self.data_matrix[index][:, :, 2]
-        ch_slice3 = self.data_matrix[index][:, :, 3]
+        # Extract channels safely
+        ch0 = sample[:, :, 0]
+        ch1 = sample[:, :, 1] if C > 1 else ch0
+        ch2 = sample[:, :, 2] if C > 2 else ch1
+        ch3 = sample[:, :, 3] if C > 3 else ch2  # use ch2 if ch3 missing
 
         img = np.zeros((201, 201, 3))
         if self.multi_modal:
-            ch_slice = self.AvoidDamagedVal(ch_slice)
-            ch_slice1 = self.AvoidDamagedVal(ch_slice1)
-            #ch_slice2 = self.AvoidDamagedVal(ch_slice2)
-            ch_slice3 = self.AvoidDamagedVal(ch_slice3)
+            ch0 = self.AvoidDamagedVal(ch0)
+            ch1 = self.AvoidDamagedVal(ch1)
+            ch2 = self.AvoidDamagedVal(ch2)
+            ch3 = self.AvoidDamagedVal(ch3)
 
-            # img[:, :, 0] = ch_slice # IR
-            # img[:, :, 1] = ch_slice1# Water vapor
-            # img[:, :, 2] = ch_slice3# PMW
-            img[:, :, 0] = ch_slice # IR
-            img[:, :, 1] = ch_slice# Water vapor
-            img[:, :, 2] = ch_slice3# PMW
-        else: 
-            img[:, :, 0] = ch_slice
-            img[:, :, 1] = ch_slice
-            img[:, :, 2] = ch_slice
+            # Map to model input channels: keep IR in channel 0, WV in channel 1,
+            # and use PMW (or fallback channel) in channel 2.
+            img[:, :, 0] = ch0  # IR
+            img[:, :, 1] = ch1  # Water vapor
+            img[:, :, 2] = ch3  # PMW if present, else ch2
+        else:
+            # Single-modal: replicate first channel to RGB
+            img[:, :, 0] = ch0
+            img[:, :, 1] = ch0
+            img[:, :, 2] = ch0
 
         img = img.astype(np.uint8)
         img = PIL.Image.fromarray(img)

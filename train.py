@@ -58,7 +58,7 @@ def parse_args():
 
     parser.add_argument(
         "--dataset_root",
-        default=r"I:\TCIR-SPLT",
+        default=r"F:\CODE_Classify\Position\Tint\data",
         # default="/home/chenhuanxin/datasets/TCIR-SPLT",
         help="The path of dataset dir.",
     )
@@ -89,7 +89,7 @@ def parse_args():
 
     parser.add_argument(
         "--batch_size",
-        default=32,
+        default=128,
         type=int,
         help="On the contrastive step this will be multiplied by two.",
     )
@@ -126,7 +126,7 @@ def parse_args():
     #                    default='/media/dell/564C2A944C2A6F45/LinuxCode/TyphoonEstimation/Pretrained/resnet50-19c8e357.pth',
     #                    help='initial weights path')
 
-    parser.add_argument('--weights', default=r"I:\Models\resnet34-333f7ec4.pth", type=str, help='initial weights path')
+    parser.add_argument('--weights', default=r"F:\CODE_Classify\Position\Tint\models\resnet34-333f7ec4.pth", type=str, help='initial weights path')
 
     parser.add_argument("--cosine", default=False, type=bool, help="Check this to use cosine annealing instead of ")
 
@@ -226,7 +226,8 @@ def train_any(model, train_loader, test_loader, criterion, optimizer, writer, ar
                     outputs = model(inputs).logits
                 else:
                     outputs = model(inputs)
-                    outputs = torch.squeeze(outputs)
+                    # Make output 1-D across batch: safe for batch_size=1 and >1
+                    outputs = outputs.view(-1)
 
                 targets = targets.float()
 
@@ -276,7 +277,7 @@ def train_any(model, train_loader, test_loader, criterion, optimizer, writer, ar
                     outputs = model(inputs).logits
                 else:
                     outputs = model(inputs)
-                    outputs = torch.squeeze(outputs)
+                    outputs = outputs.view(-1)
 
                 targets = targets.float()
 
@@ -351,7 +352,7 @@ def validation_any(epoch, model, test_loader, criterion, writer, args, loghandle
             inputs, targets = inputs.to(args.device), targets.to(args.device)
 
             outputs = model(inputs)
-            outputs = torch.squeeze(outputs)
+            outputs = outputs.view(-1)
             predicted = outputs
 
             total += targets.size(0)
@@ -526,13 +527,52 @@ def validation(epoch, model, test_loader, criterion, writer, args, loghandle, ck
         torch.save(state, savepath)
 
 def main():
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    # Respect existing environment, but avoid forcing an invalid CUDA device.
+    # Keep CUDA_VISIBLE_DEVICES if set externally; do not overwrite unconditionally.
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     args = parse_args()
-    torch.cuda.set_device(args.gpu)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Explicitly set the device to GPU
+    import torch
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Ensure the model is moved to the GPU
+    model = get_resnet_ms(args.model)  # Initialize the model
+    model = model.to(device)  # Move the model to the GPU
+    print(f"Model is on device: {next(model.parameters()).device}")
+
+    # Determine device safely and provide clear diagnostics for the user.
+    try:
+        cuda_available = torch.cuda.is_available()
+    except Exception:
+        cuda_available = False
+
+    if cuda_available:
+        # Only attempt to set device if CUDA is available
+        try:
+            torch.cuda.set_device(args.gpu)
+        except Exception as e:
+            # If setting the device fails, fall back to CPU but log the reason.
+            print(f"Warning: failed to set CUDA device {args.gpu}: {e}")
+            cuda_available = False
+
+    device = torch.device("cuda" if cuda_available else "cpu")
     args.device = device
+
+    # Print explicit diagnostics so it's clear why CPU/GPU is used.
+    print(f"torch.cuda.is_available() = {torch.cuda.is_available()}")
+    if device.type == 'cuda':
+        try:
+            print(f"Using CUDA device: index={args.gpu}, name={torch.cuda.get_device_name(args.gpu)}")
+            print(f"CUDA device count: {torch.cuda.device_count()}")
+        except Exception:
+            print(f"Using CUDA device index {args.gpu} (could not query device name)")
+    else:
+        print("Using device: CPU (torch will run on CPU)")
 
     if not os.path.isdir("logs"):
         os.makedirs("logs")
@@ -675,7 +715,7 @@ def main():
         # if args.weights is not None:
         #     model.load_state_dict(torch.load(args.weights)['net'])
         #     print("Successful using myself pretrain-weights.")
-        print("Successful using pretrain-weights.")
+        #     print("Successful using pretrain-weights.")
     else:
         model = get_resnet_ms(args.model, num_classes)
 
@@ -731,6 +771,14 @@ def main():
         model = nn.DataParallel(model, device_ids=[0,1,2,3])
 
     model = model.to(args.device)
+
+    # Add logging to verify device allocation
+    print(f"Using device: {device}")
+
+    # Ensure model is moved to the correct device
+    model = model.to(device)
+    print(f"Model is on device: {next(model.parameters()).device}")
+    print("If the device is 'cpu', ensure CUDA is properly configured and the model is moved to GPU.")
 
     cudnn.benchmark = True
 
